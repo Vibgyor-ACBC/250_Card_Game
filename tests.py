@@ -339,6 +339,49 @@ class TestCardAsk:
                 return
         pytest.skip("Ace of Spades always in bidder hand across 30 seeds")
 
+    def test_asked_card_in_remaining_deck(self):
+        """If an asked card is in the remaining deck, the person who receives it joins the team."""
+        import random
+        # Try many seeds to find a scenario where an asked card lands in remaining deck
+        for seed in range(100):
+            random.seed(seed)
+            game, pids = make_full_game()
+            complete_bidding(game, pids, bidder_index=0, amount=160)
+            game.select_trump(pids[0], "hearts")
+            bidder = game._get_player(pids[0])
+            
+            # Check if any card in remaining deck is valid to ask for
+            from models import Card
+            ace_spades = Card("A", "spades")
+            askable_in_remaining = [
+                c for c in game._remaining_deck
+                if c not in bidder.hand and c != ace_spades
+            ]
+            
+            if len(askable_in_remaining) >= 2:
+                # Ask for two cards that are currently in the remaining deck
+                asked_ids = [askable_in_remaining[0].id, askable_in_remaining[1].id]
+                r = game.ask_for_cards(pids[0], asked_ids)
+                assert r.ok
+                
+                # After dealing, check who got the cards and verify team assignment
+                for i, p in enumerate(game.players):
+                    has_asked = any(c in askable_in_remaining[:2] for c in p.hand)
+                    if has_asked and p.player_id != pids[0]:
+                        assert p.player_id in game._bidder_team, \
+                            f"Player {p.name} got an asked card but is not on bidder team"
+                
+                # If bidder got one of the asked cards, they're still just on their own team
+                bidder_final = game._get_player(pids[0])
+                bidder_has_asked = any(c in askable_in_remaining[:2] for c in bidder_final.hand)
+                if bidder_has_asked:
+                    # Bidder ended up with a card they asked for (edge case) — they're solo or have fewer teammates
+                    pass  # This is allowed
+                
+                return
+        
+        pytest.skip("Could not find scenario with 2 askable cards in remaining deck across 100 seeds")
+
 
 # ---------------------------------------------------------------------------
 # Trick-taking tests

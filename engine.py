@@ -270,7 +270,12 @@ class Game:
 
         self.asked_cards = asked
 
-        # Silently assign teams
+        # Distribute remaining cards first (asked cards might be in the remaining deck)
+        extras = deal_remaining(self._remaining_deck)
+        for player, extra in zip(self.players, extras):
+            player.hand.extend(extra)
+
+        # Assign teams after all cards are dealt (so asked cards are in final hands)
         self._bidder_team = [player_id]
         for p in self.players:
             if p.player_id == player_id:
@@ -281,11 +286,6 @@ class Game:
                     break
         self._opponent_team = [p.player_id for p in self.players
                                if p.player_id not in self._bidder_team]
-
-        # Distribute remaining cards
-        extras = deal_remaining(self._remaining_deck)
-        for player, extra in zip(self.players, extras):
-            player.hand.extend(extra)
 
         self.phase = GamePhase.PLAYING
         # Highest bidder always leads the first trick
