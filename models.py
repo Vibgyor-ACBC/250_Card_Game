@@ -185,8 +185,7 @@ class RoundResult:
     bidder_id: str
     bid: int
     bidder_team: list[str]       # player_ids
-    opponent_team: list[str]
-    bidder_points: int     # player_ids
+    opponent_team: list[str]    # player_ids
     bidder_team_points: int
     opponent_team_points: int
     bidder_team_won: bool
