@@ -257,6 +257,51 @@ class TestCardAsk:
         assert pids[0] in game._bidder_team
         assert len(game._bidder_team) + len(game._opponent_team) == 6
 
+    def test_ace_of_spades_cannot_be_asked(self):
+        """Bidder must never be allowed to ask for the Ace of Spades."""
+        import random
+        random.seed(42)
+        # Keep re-dealing until A_spades is not in the bidder hand
+        for _ in range(30):
+            game, pids = make_full_game()
+            complete_bidding(game, pids, bidder_index=0, amount=160)
+            game.select_trump(pids[0], "hearts")
+            bidder = game._get_player(pids[0])
+            from models import Card
+            ace_spades = Card("A", "spades")
+            if ace_spades not in bidder.hand:
+                # Get one other askable card to pair with A_spades
+                other = next(
+                    c.id for p in game.players if p.player_id != pids[0]
+                    for c in p.hand if c != ace_spades
+                )
+                r = game.ask_for_cards(pids[0], ["A_spades", other])
+                assert not r.ok, "Ace of Spades should be forbidden"
+                assert "Ace of Spades" in r.error
+                return
+        pytest.skip("Ace of Spades always in bidder hand across 30 seeds")
+
+    def test_ace_of_spades_as_second_card_rejected(self):
+        """A_spades forbidden regardless of position in the request list."""
+        import random
+        random.seed(7)
+        for _ in range(30):
+            game, pids = make_full_game()
+            complete_bidding(game, pids, bidder_index=0, amount=160)
+            game.select_trump(pids[0], "clubs")
+            bidder = game._get_player(pids[0])
+            from models import Card
+            ace_spades = Card("A", "spades")
+            if ace_spades not in bidder.hand:
+                other = next(
+                    c.id for p in game.players if p.player_id != pids[0]
+                    for c in p.hand if c != ace_spades
+                )
+                r = game.ask_for_cards(pids[0], [other, "A_spades"])
+                assert not r.ok
+                return
+        pytest.skip("Ace of Spades always in bidder hand across 30 seeds")
+
 
 # ---------------------------------------------------------------------------
 # Trick-taking tests
@@ -366,6 +411,63 @@ class TestScoring:
             assert result.bidder_team_points >= result.bid
         else:
             assert result.bidder_team_points < result.bid
+
+    def test_scores_on_bidder_win(self):
+        """Bidder +2, teammates +1, opponents unchanged."""
+        game, pids = make_full_game()
+        advance_to_playing(game, pids)
+        bidder_id = game.highest_bidder_id
+        before = dict(game.scores)
+        # Play all tricks
+        for _ in range(48):
+            if game.phase != GamePhase.PLAYING:
+                break
+            pid = game._current_player_id
+            player = game._get_player(pid)
+            led_suit = game.current_trick.led_suit
+            legal = ([c for c in player.hand if c.suit == led_suit] or player.hand) if led_suit else player.hand
+            game.play_card(pid, legal[0].id)
+        result = game.round_results[-1]
+        if result.bidder_team_won:
+            assert game.scores[bidder_id] == before[bidder_id] + 2
+            for pid in result.bidder_team:
+                if pid != bidder_id:
+                    assert game.scores[pid] == before[pid] + 1
+            for pid in result.opponent_team:
+                assert game.scores[pid] == before[pid]
+
+    def test_scores_on_bidder_loss(self):
+        """Bidder -1, teammates unchanged, opponents +1."""
+        # Run many games until we see a loss (bid set high to make loss likely)
+        import random
+        random.seed(99)
+        for _ in range(50):
+            game, pids = make_full_game()
+            # Force an impossibly high bid so bidder almost always loses
+            complete_bidding(game, pids, bidder_index=0, amount=250)
+            game.select_trump(pids[0], "spades")
+            card_ids = get_two_askable_cards(game, pids[0])
+            game.ask_for_cards(pids[0], card_ids)
+            before = dict(game.scores)
+            bidder_id = game.highest_bidder_id
+            for _ in range(48):
+                if game.phase != GamePhase.PLAYING:
+                    break
+                pid = game._current_player_id
+                player = game._get_player(pid)
+                led_suit = game.current_trick.led_suit
+                legal = ([c for c in player.hand if c.suit == led_suit] or player.hand) if led_suit else player.hand
+                game.play_card(pid, legal[0].id)
+            result = game.round_results[-1]
+            if not result.bidder_team_won:
+                assert game.scores[bidder_id] == before[bidder_id] - 1
+                for pid in result.bidder_team:
+                    if pid != bidder_id:
+                        assert game.scores[pid] == before[pid]
+                for pid in result.opponent_team:
+                    assert game.scores[pid] == before[pid] + 1
+                return
+        pytest.skip("Bidder always won across 50 random seeds with bid=250")
 
 
 # ---------------------------------------------------------------------------

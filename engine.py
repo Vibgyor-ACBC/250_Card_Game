@@ -249,6 +249,12 @@ class Game:
         if asked[0] == asked[1]:
             return ActionResult.fail("The two cards must be different")
 
+        # Ace of Spades cannot be asked for
+        ace_of_spades = Card(rank="A", suit="spades")
+        for c in asked:
+            if c == ace_of_spades:
+                return ActionResult.fail("The Ace of Spades cannot be asked for")
+
         # The bidder cannot ask for cards in their own hand
         bidder = self._get_player(player_id)
         for c in asked:
@@ -369,15 +375,17 @@ class Game:
         bidder_won = bidder_pts >= self.highest_bid
 
         # Update cumulative scores
+        # Win:  bidder +2, bidder teammates +1 each, opponents +0
+        # Loss: bidder -1, bidder teammates +0,      opponents +1 each
         if bidder_won:
+            self.scores[self.highest_bidder_id] = self.scores.get(self.highest_bidder_id, 0) + 2
             for pid in self._bidder_team:
-                self.scores[pid] = self.scores.get(pid, 0) + bidder_pts
+                if pid != self.highest_bidder_id:
+                    self.scores[pid] = self.scores.get(pid, 0) + 1
         else:
-            # Bidder team loses the bid amount; opponents gain their points
-            for pid in self._bidder_team:
-                self.scores[pid] = self.scores.get(pid, 0) - self.highest_bid
+            self.scores[self.highest_bidder_id] = self.scores.get(self.highest_bidder_id, 0) - 1
             for pid in self._opponent_team:
-                self.scores[pid] = self.scores.get(pid, 0) + opp_pts
+                self.scores[pid] = self.scores.get(pid, 0) + 1
 
         # Build reveal map
         team_revealed = {}
