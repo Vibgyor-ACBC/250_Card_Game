@@ -71,13 +71,31 @@ def run():
 
     # ── 3. Bidding ───────────────────────────────────────────────────────────
     section("BIDDING")
-    bids = [160, None, 180, None, None, 170]   # Carol=180 wins
-    for pid, amount, name in zip(pids, bids, names):
+    # Back-and-forth: Alice opens, Bob raises, Alice raises back, Bob raises,
+    # then Carol/Dave/Eve/Frank all pass, finally Alice passes -> Bob wins.
+    name_map = {pid: name for pid, name in zip(pids, names)}
+    bid_actions = [
+        (pids[0], 160),   # Alice opens
+        (pids[1], 175),   # Bob raises
+        (pids[0], 185),   # Alice raises back
+        (pids[1], 200),   # Bob raises again
+        (pids[2], None),  # Carol passes
+        (pids[3], None),  # Dave passes
+        (pids[4], None),  # Eve passes
+        (pids[5], None),  # Frank passes
+        (pids[0], None),  # Alice passes -> only Bob left, bidding closes
+    ]
+    for pid, amount in bid_actions:
         r = game.place_bid(pid, amount)
         label = f"{amount}" if amount else "pass"
-        status = f"  → highest now {r.data['highest_bid']} ({game._get_player(r.data['highest_bidder_id']).name})" \
-                 if r.data.get('highest_bidder_id') else ""
-        print(f"  {name:8s}  bids {label:>4s}{status}")
+        if r.data.get('highest_bidder_id'):
+            leader = game._get_player(r.data['highest_bidder_id']).name
+            status = f"  -> highest now {r.data['highest_bid']} ({leader})"
+        else:
+            status = ""
+        active = len(r.data.get('active_bidders', []))
+        active_str = f"  [{active} still active]" if active > 1 else ""
+        print(f"  {name_map[pid]:8s}  {label:>4s}{status}{active_str}")
 
     bidder = game._get_player(game.highest_bidder_id)
     print(f"\n  Winner: {bidder.name} with bid {game.highest_bid}")

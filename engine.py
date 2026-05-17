@@ -69,8 +69,8 @@ class Game:
         self.current_turn_index: int = 0
 
         # Bidding state
-        self._bid_order: list[str] = []          # tracks who still needs to bid
-        self._bids_received: set[str] = set()
+        self._active_bidders: list[str] = []     # players still eligible to bid (haven't passed)
+        self._bids_received: set[str] = set()    # everyone who has acted at least once
 
         # Cumulative scores across rounds
         self.scores: dict[str, int] = {}         # player_id → total points
@@ -137,7 +137,7 @@ class Game:
         self.current_trick = None
         self.trick_history = []
         self._bids_received = set()
-        self._bid_order = list(self.player_ids)
+        self._active_bidders = list(self.player_ids)  # all start as active
 
         for p in self.players:
             p.hand.clear()
@@ -161,39 +161,46 @@ class Game:
 
     def place_bid(self, player_id: str, amount: Optional[int]) -> ActionResult:
         """
-        amount=None means the player passes.
-        First-bid-wins tie-breaking is enforced by checking highest_bid strictly.
+        amount=None  → player passes (permanently removed from bidding).
+        amount=int   → must be strictly greater than the current highest bid.
+        Bidding ends when only 1 active bidder remains (they win automatically)
+        OR all remaining active bidders pass in succession leaving one winner.
         """
         if err := self._assert_phase(GamePhase.BIDDING):
             return err
         player = self._get_player(player_id)
         if not player:
             return ActionResult.fail("Unknown player")
-        if player_id in self._bids_received:
-            return ActionResult.fail("You have already bid this round")
+        if player_id not in self._active_bidders:
+            return ActionResult.fail("You have already passed and cannot bid again")
 
-        self._bids_received.add(player_id)
-
-        if amount is not None:
+        if amount is None:
+            # Player passes — remove them permanently
+            self._active_bidders.remove(player_id)
+            self._bids_received.add(player_id)
+            player.bid = 0  # 0 = passed
+        else:
             if not isinstance(amount, int) or amount <= 0:
                 return ActionResult.fail("Bid must be a positive integer")
             if amount > TOTAL_POINTS:
                 return ActionResult.fail(f"Bid cannot exceed {TOTAL_POINTS}")
-            # First-bid-wins: only strictly greater replaces the current leader
-            if amount > self.highest_bid:
-                self.highest_bid = amount
-                self.highest_bidder_id = player_id
+            if amount <= self.highest_bid:
+                return ActionResult.fail(
+                    f"Bid must be strictly greater than current highest ({self.highest_bid})"
+                )
+            self.highest_bid = amount
+            self.highest_bidder_id = player_id
             player.bid = amount
-        else:
-            player.bid = 0   # 0 = passed
+            self._bids_received.add(player_id)
 
-        # Advance to trump selection once all players have acted
-        if len(self._bids_received) == self.MAX_PLAYERS:
-            if self.highest_bidder_id is None:
-                # Nobody bid — re-deal (edge case)
-                self._start_round()
-                return ActionResult.success("no_bids_redeal")
+        # Bidding closes when only one active bidder remains AND a bid exists.
+        # If nobody has bid yet and one player remains, they must still act.
+        if len(self._active_bidders) == 1 and self.highest_bidder_id is not None:
             self.phase = GamePhase.TRUMP_SELECT
+        elif len(self._active_bidders) == 0:
+            # Everyone passed without any bid → re-deal
+            self._start_round()
+            return ActionResult.success("no_bids_redeal")
 
         return ActionResult.success(
             "bid_placed",
@@ -201,7 +208,7 @@ class Game:
             amount=amount,
             highest_bid=self.highest_bid,
             highest_bidder_id=self.highest_bidder_id,
-            bids_remaining=self.MAX_PLAYERS - len(self._bids_received),
+            active_bidders=list(self._active_bidders),
         )
 
     # -----------------------------------------------------------------------
@@ -281,6 +288,9 @@ class Game:
             player.hand.extend(extra)
 
         self.phase = GamePhase.PLAYING
+        # Highest bidder always leads the first trick
+        bidder_index = self.turn_order.index(self.highest_bidder_id)
+        self.current_turn_index = bidder_index
         self.current_trick = Trick(leader_id=self._current_player_id)
 
         return ActionResult.success(
@@ -308,7 +318,9 @@ class Game:
         if card not in player.hand:
             return ActionResult.fail("You don't have that card")
 
-        # Follow-suit enforcement
+        # Follow-suit enforcement: must follow led suit if possible.
+        # Only if a player has no card of the led suit may they play any other suit,
+        # including trump.
         led_suit = self.current_trick.led_suit
         if led_suit and card.suit != led_suit:
             has_led_suit = any(c.suit == led_suit for c in player.hand)

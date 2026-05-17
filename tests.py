@@ -28,10 +28,15 @@ def bid_all_pass(game: Game, player_ids: list[str]) -> None:
 
 
 def complete_bidding(game: Game, player_ids: list[str], bidder_index: int, amount: int):
-    """All players bid; player at bidder_index bids `amount`, rest pass."""
+    """Bidder bids first, then all others pass — bidding closes when last active player passes."""
+    # Bidder bids first so they hold the highest bid
+    r = game.place_bid(player_ids[bidder_index], amount)
+    assert r.ok, r.error
+    # All others pass, one by one; the last pass closes bidding
     for i, pid in enumerate(player_ids):
-        amt = amount if i == bidder_index else None
-        r = game.place_bid(pid, amt)
+        if i == bidder_index:
+            continue
+        r = game.place_bid(pid, None)
         assert r.ok, r.error
 
 
@@ -147,12 +152,13 @@ class TestBidding:
         game.place_bid(pids[1], 200)
         assert game.highest_bidder_id == pids[1]
 
-    def test_equal_bid_first_wins(self):
-        """First-bid-wins: second equal bid should NOT displace the first."""
+    def test_equal_bid_rejected(self):
+        """A bid must strictly exceed the current highest — equal bids are rejected."""
         game, pids = make_full_game()
         game.place_bid(pids[0], 160)
-        game.place_bid(pids[1], 160)
-        assert game.highest_bidder_id == pids[0]   # first bidder keeps it
+        r = game.place_bid(pids[1], 160)
+        assert not r.ok
+        assert game.highest_bidder_id == pids[0]   # first bidder still leads
 
     def test_pass_is_valid(self):
         game, pids = make_full_game()
@@ -160,10 +166,22 @@ class TestBidding:
         assert r.ok
         assert game.highest_bidder_id is None
 
-    def test_double_bid_rejected(self):
+    def test_rebid_allowed_if_higher(self):
+        """A player who has not passed can raise their own bid."""
         game, pids = make_full_game()
         game.place_bid(pids[0], 150)
-        r = game.place_bid(pids[0], 200)
+        game.place_bid(pids[1], 160)
+        r = game.place_bid(pids[0], 170)
+        assert r.ok
+        assert game.highest_bidder_id == pids[0]
+        assert game.highest_bid == 170
+
+    def test_passed_player_cannot_rebid(self):
+        """Once a player passes they are locked out."""
+        game, pids = make_full_game()
+        game.place_bid(pids[0], 150)
+        game.place_bid(pids[1], None)
+        r = game.place_bid(pids[1], 160)
         assert not r.ok
 
     def test_all_pass_redeals(self):
@@ -178,6 +196,25 @@ class TestBidding:
         complete_bidding(game, pids, bidder_index=2, amount=170)
         assert game.phase == GamePhase.TRUMP_SELECT
         assert game.highest_bidder_id == pids[2]
+
+    def test_back_and_forth_bidding(self):
+        """Players can raise each other multiple times before anyone passes."""
+        game, pids = make_full_game()
+        game.place_bid(pids[0], 160)
+        game.place_bid(pids[1], 175)
+        r = game.place_bid(pids[0], 185)
+        assert r.ok
+        assert game.highest_bid == 185
+        assert game.highest_bidder_id == pids[0]
+        r = game.place_bid(pids[1], 200)
+        assert r.ok
+        assert game.highest_bidder_id == pids[1]
+        # remaining players pass; pids[0] also passes -> pids[1] wins
+        for pid in pids[2:]:
+            game.place_bid(pid, None)
+        game.place_bid(pids[0], None)
+        assert game.phase == GamePhase.TRUMP_SELECT
+        assert game.highest_bidder_id == pids[1]
 
     def test_bid_exceeding_250_rejected(self):
         game, pids = make_full_game()
@@ -366,6 +403,56 @@ class TestTrickTaking:
         assert game.phase in (GamePhase.PLAYING, GamePhase.ROUND_END)
         if game.phase == GamePhase.PLAYING:
             assert len(game.trick_history) == 1
+
+    def test_bidder_leads_first_trick(self):
+        """The highest bidder must be the first player to lead."""
+        game, pids = make_full_game()
+        advance_to_playing(game, pids)
+        assert game._current_player_id == game.highest_bidder_id
+
+    def test_trump_wins_when_no_led_suit(self):
+        """A trump card beats all non-trump when the player cannot follow suit."""
+        game, pids = make_full_game()
+        advance_to_playing(game, pids)
+        leader_id = game._current_player_id
+        leader = game._get_player(leader_id)
+        led_card = leader.hand[0]
+        game.play_card(leader_id, led_card.id)
+        led_suit = led_card.suit
+        for _ in range(5):
+            next_id = game._current_player_id
+            next_p = game._get_player(next_id)
+            has_led = [c for c in next_p.hand if c.suit == led_suit]
+            trump_cards = [c for c in next_p.hand if c.suit == game.trump_suit]
+            if not has_led and trump_cards:
+                r = game.play_card(next_id, trump_cards[0].id)
+                assert r.ok, f"Trump should be legal when player cannot follow suit: {r.error}"
+                return
+            legal = has_led or next_p.hand
+            game.play_card(next_id, legal[0].id)
+        import pytest; pytest.skip("No player found without led suit but with a trump card")
+
+    def test_trump_blocked_when_player_has_led_suit(self):
+        """If a player has the led suit, they must follow it — cannot play trump instead."""
+        game, pids = make_full_game()
+        advance_to_playing(game, pids)
+        leader_id = game._current_player_id
+        leader = game._get_player(leader_id)
+        led_card = leader.hand[0]
+        game.play_card(leader_id, led_card.id)
+        led_suit = led_card.suit
+        for _ in range(5):
+            next_id = game._current_player_id
+            next_p = game._get_player(next_id)
+            has_led = [c for c in next_p.hand if c.suit == led_suit]
+            trump_cards = [c for c in next_p.hand if c.suit == game.trump_suit]
+            if has_led and trump_cards:
+                r = game.play_card(next_id, trump_cards[0].id)
+                assert not r.ok, "Should be forced to follow suit even if holding trump"
+                return
+            legal = has_led or next_p.hand
+            game.play_card(next_id, legal[0].id)
+        import pytest; pytest.skip("No player had both led suit and trump in hand")
 
 
 # ---------------------------------------------------------------------------
