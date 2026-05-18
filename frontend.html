@@ -1,0 +1,1256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>250 Card Game</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+      --felt-green: #0d5f3a;
+      --felt-dark: #094029;
+      --wood-brown: #3d2817;
+      --gold: #d4af37;
+      --burgundy: #6b1f1f;
+      --card-bg: #f8f6f0;
+      --card-shadow: rgba(0, 0, 0, 0.3);
+      --text-light: #f8f6f0;
+      --text-dark: #1a1a1a;
+    }
+
+    body {
+      font-family: Georgia, 'Times New Roman', serif;
+      background: linear-gradient(135deg, var(--felt-dark) 0%, var(--felt-green) 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-light);
+      position: relative;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: 
+        repeating-linear-gradient(
+          0deg,
+          transparent,
+          transparent 2px,
+          rgba(0, 0, 0, 0.03) 2px,
+          rgba(0, 0, 0, 0.03) 4px
+        ),
+        repeating-linear-gradient(
+          90deg,
+          transparent,
+          transparent 2px,
+          rgba(0, 0, 0, 0.03) 2px,
+          rgba(0, 0, 0, 0.03) 4px
+        );
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    #root {
+      width: 100%;
+      max-width: 1400px;
+      padding: 2rem;
+      position: relative;
+      z-index: 1;
+    }
+
+    .game-container {
+      background: var(--felt-green);
+      border: 20px solid var(--wood-brown);
+      border-radius: 20px;
+      box-shadow: 
+        0 20px 60px rgba(0, 0, 0, 0.5),
+        inset 0 0 100px rgba(0, 0, 0, 0.2);
+      padding: 3rem;
+      position: relative;
+    }
+
+    .game-container::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 4px;
+      background: 
+        repeating-linear-gradient(
+          45deg,
+          transparent,
+          transparent 3px,
+          rgba(0, 0, 0, 0.02) 3px,
+          rgba(0, 0, 0, 0.02) 6px
+        );
+      pointer-events: none;
+    }
+
+    /* Lobby Screen */
+    .lobby {
+      text-align: center;
+      max-width: 500px;
+      margin: 0 auto;
+    }
+
+    .lobby h1 {
+      font-size: 3.5rem;
+      color: var(--gold);
+      text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+      margin-bottom: 0.5rem;
+      letter-spacing: 0.05em;
+    }
+
+    .lobby p {
+      font-size: 1.1rem;
+      opacity: 0.9;
+      margin-bottom: 2rem;
+    }
+
+    .mode-selector {
+      display: flex;
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+
+    .mode-btn {
+      flex: 1;
+      padding: 1rem;
+      background: rgba(255, 255, 255, 0.1);
+      border: 2px solid var(--gold);
+      border-radius: 8px;
+      color: var(--text-light);
+      font-size: 1rem;
+      font-family: inherit;
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+
+    .mode-btn:hover {
+      background: rgba(212, 175, 55, 0.2);
+      transform: translateY(-2px);
+    }
+
+    .mode-btn.active {
+      background: var(--gold);
+      color: var(--text-dark);
+      font-weight: bold;
+    }
+
+    .input-group {
+      margin-bottom: 1.5rem;
+    }
+
+    .input-group label {
+      display: block;
+      text-align: left;
+      margin-bottom: 0.5rem;
+      font-size: 0.95rem;
+      opacity: 0.9;
+    }
+
+    .input-group input {
+      width: 100%;
+      padding: 0.75rem;
+      background: rgba(255, 255, 255, 0.95);
+      border: 2px solid var(--wood-brown);
+      border-radius: 6px;
+      font-size: 1rem;
+      font-family: inherit;
+      color: var(--text-dark);
+    }
+
+    .btn {
+      padding: 1rem 2rem;
+      background: var(--burgundy);
+      color: var(--text-light);
+      border: none;
+      border-radius: 8px;
+      font-size: 1.1rem;
+      font-family: inherit;
+      font-weight: bold;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+
+    .btn:hover {
+      background: #8b2828;
+      transform: translateY(-2px);
+      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    /* Game Table */
+    .table {
+      position: relative;
+      min-height: 600px;
+    }
+
+    .table-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 2rem;
+      padding: 1rem;
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 8px;
+    }
+
+    .game-info {
+      display: flex;
+      gap: 2rem;
+      align-items: center;
+    }
+
+    .info-item {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+
+    .info-label {
+      font-size: 0.85rem;
+      opacity: 0.7;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .info-value {
+      font-size: 1.3rem;
+      font-weight: bold;
+      color: var(--gold);
+    }
+
+    .phase-indicator {
+      padding: 0.5rem 1rem;
+      background: var(--burgundy);
+      border-radius: 6px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      font-size: 0.9rem;
+    }
+
+    /* Player Seats */
+    .seats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      grid-template-rows: auto 1fr auto;
+      gap: 2rem;
+      min-height: 500px;
+    }
+
+    .seat {
+      padding: 1rem;
+      background: rgba(0, 0, 0, 0.2);
+      border: 2px solid transparent;
+      border-radius: 12px;
+      transition: all 0.3s ease;
+    }
+
+    .seat.current-turn {
+      border-color: var(--gold);
+      background: rgba(212, 175, 55, 0.15);
+      box-shadow: 0 0 20px rgba(212, 175, 55, 0.3);
+    }
+
+    .seat.you {
+      grid-column: 2;
+      grid-row: 3;
+      border-color: var(--burgundy);
+    }
+
+    .seat-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.75rem;
+    }
+
+    .player-name {
+      font-weight: bold;
+      font-size: 1.1rem;
+    }
+
+    .player-score {
+      font-family: 'Courier New', monospace;
+      font-size: 1rem;
+      color: var(--gold);
+    }
+
+    .player-bid {
+      margin-top: 0.5rem;
+      font-size: 0.9rem;
+      opacity: 0.8;
+    }
+
+    /* Cards */
+    .hand {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      min-height: 80px;
+    }
+
+    .card {
+      width: 60px;
+      height: 84px;
+      background: var(--card-bg);
+      border: 2px solid #333;
+      border-radius: 6px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.2rem;
+      font-weight: bold;
+      box-shadow: 0 2px 8px var(--card-shadow);
+      cursor: pointer;
+      transition: transform 0.2s ease;
+      position: relative;
+    }
+
+    .card:hover {
+      transform: translateY(-8px);
+    }
+
+    .card.disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .card.disabled:hover {
+      transform: none;
+    }
+
+    .card-back {
+      background: 
+        repeating-linear-gradient(
+          45deg,
+          var(--burgundy),
+          var(--burgundy) 10px,
+          #8b2828 10px,
+          #8b2828 20px
+        );
+      color: transparent;
+    }
+
+    .card-rank {
+      font-size: 1.4rem;
+      line-height: 1;
+    }
+
+    .card-suit {
+      font-size: 1.8rem;
+      line-height: 1;
+    }
+
+    .card.red {
+      color: #c41e3a;
+    }
+
+    .card.black {
+      color: #1a1a1a;
+    }
+
+    .card-points {
+      position: absolute;
+      top: 2px;
+      right: 2px;
+      background: var(--gold);
+      color: var(--text-dark);
+      font-size: 0.65rem;
+      padding: 2px 4px;
+      border-radius: 3px;
+      font-weight: bold;
+    }
+
+    /* Trick Area */
+    .trick-area {
+      grid-column: 2;
+      grid-row: 2;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 1rem;
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 50%;
+      padding: 2rem;
+      min-height: 200px;
+    }
+
+    .trick-cards {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .trick-info {
+      text-align: center;
+      font-size: 0.9rem;
+      opacity: 0.8;
+    }
+
+    /* Bidding Panel */
+    .bidding-panel {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(13, 95, 58, 0.98);
+      border: 4px solid var(--gold);
+      border-radius: 12px;
+      padding: 2rem;
+      min-width: 400px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+      z-index: 100;
+    }
+
+    .bidding-panel h3 {
+      text-align: center;
+      margin-bottom: 1.5rem;
+      color: var(--gold);
+      font-size: 1.5rem;
+    }
+
+    .bid-input {
+      display: flex;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .bid-input input {
+      flex: 1;
+      padding: 0.75rem;
+      font-size: 1.2rem;
+      text-align: center;
+      font-weight: bold;
+      background: var(--card-bg);
+      border: 2px solid var(--wood-brown);
+      border-radius: 6px;
+      font-family: 'Courier New', monospace;
+    }
+
+    .bid-actions {
+      display: flex;
+      gap: 1rem;
+    }
+
+    .bid-actions button {
+      flex: 1;
+    }
+
+    .bid-history {
+      margin-top: 1.5rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.2);
+      max-height: 150px;
+      overflow-y: auto;
+    }
+
+    .bid-entry {
+      padding: 0.5rem;
+      margin-bottom: 0.5rem;
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 4px;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    /* Trump Selector */
+    .trump-selector {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+
+    .suit-btn {
+      padding: 1.5rem;
+      font-size: 2rem;
+      background: rgba(255, 255, 255, 0.1);
+      border: 2px solid var(--gold);
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+
+    .suit-btn:hover {
+      background: rgba(212, 175, 55, 0.2);
+      transform: scale(1.05);
+    }
+
+    /* Card Selector */
+    .card-selector {
+      max-height: 400px;
+      overflow-y: auto;
+    }
+
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
+      gap: 0.75rem;
+      margin-top: 1rem;
+    }
+
+    .selectable-card {
+      width: 100%;
+      height: 98px;
+      cursor: pointer;
+      opacity: 0.7;
+      transition: all 0.2s ease;
+    }
+
+    .selectable-card:hover {
+      opacity: 1;
+      transform: scale(1.05);
+    }
+
+    .selectable-card.selected {
+      opacity: 1;
+      border-color: var(--gold);
+      box-shadow: 0 0 20px rgba(212, 175, 55, 0.5);
+    }
+
+    .selected-count {
+      text-align: center;
+      margin-top: 1rem;
+      font-size: 0.9rem;
+      opacity: 0.8;
+    }
+
+    /* Scoreboard */
+    .scoreboard {
+      margin-top: 2rem;
+      padding: 1.5rem;
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 12px;
+    }
+
+    .scoreboard h3 {
+      text-align: center;
+      color: var(--gold);
+      margin-bottom: 1rem;
+    }
+
+    .score-table {
+      display: grid;
+      grid-template-columns: 2fr 1fr 1fr;
+      gap: 0.5rem;
+    }
+
+    .score-header {
+      font-weight: bold;
+      padding: 0.5rem;
+      background: rgba(0, 0, 0, 0.3);
+      text-align: center;
+      border-radius: 4px;
+    }
+
+    .score-row {
+      display: contents;
+    }
+
+    .score-cell {
+      padding: 0.5rem;
+      text-align: center;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 4px;
+    }
+
+    /* Animations */
+    @keyframes fadeIn {
+      from { opacity: 0; transform: scale(0.95); }
+      to { opacity: 1; transform: scale(1); }
+    }
+
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .lobby, .bidding-panel {
+      animation: fadeIn 0.4s ease;
+    }
+
+    .card {
+      animation: slideUp 0.3s ease backwards;
+    }
+
+    .card:nth-child(1) { animation-delay: 0.05s; }
+    .card:nth-child(2) { animation-delay: 0.1s; }
+    .card:nth-child(3) { animation-delay: 0.15s; }
+    .card:nth-child(4) { animation-delay: 0.2s; }
+    .card:nth-child(5) { animation-delay: 0.25s; }
+    .card:nth-child(6) { animation-delay: 0.3s; }
+    .card:nth-child(7) { animation-delay: 0.35s; }
+    .card:nth-child(8) { animation-delay: 0.4s; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    // Card utilities
+    const SUITS = { spades: '♠', hearts: '♥', diamonds: '♦', clubs: '♣' };
+    const SUIT_COLORS = { spades: 'black', hearts: 'red', diamonds: 'red', clubs: 'black' };
+    const POINT_VALUES = { J: 5, Q: 10, K: 15, A: 20 };
+    const ALL_RANKS = ['3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
+
+    function parseCard(cardId) {
+      const [rank, suit] = cardId.split('_');
+      return { rank, suit, id: cardId };
+    }
+
+    function getCardPoints(rank, suit) {
+      if (rank === 'Q' && suit === 'spades') return 60;
+      return POINT_VALUES[rank] || 0;
+    }
+
+    function generateAllSelectableCards(yourHand) {
+      const allCards = [];
+      Object.keys(SUITS).forEach(suit => {
+        ALL_RANKS.forEach(rank => {
+          const cardId = `${rank}_${suit}`;
+          // Exclude Ace of Spades and cards in your hand
+          if (!(rank === 'A' && suit === 'spades') && !yourHand.includes(cardId)) {
+            allCards.push(cardId);
+          }
+        });
+      });
+      return allCards;
+    }
+
+    // Main App Component
+    function App() {
+      const [mode, setMode] = useState(null); // 'bot' or 'online'
+      const [gameState, setGameState] = useState(null);
+      const [playerName, setPlayerName] = useState('');
+      const [roomCode, setRoomCode] = useState('');
+      const [yourPlayerId, setYourPlayerId] = useState(null);
+      const [ws, setWs] = useState(null);
+      const [bidAmount, setBidAmount] = useState('');
+      const [selectedCards, setSelectedCards] = useState([]);
+      const [currentTrick, setCurrentTrick] = useState([]);
+      const [roundResult, setRoundResult] = useState(null);
+      const [connected, setConnected] = useState(false);
+
+      useEffect(() => {
+        return () => {
+          if (ws) ws.close();
+        };
+      }, [ws]);
+
+      // Online mode: connect to WebSocket
+      const joinOnlineGame = () => {
+        if (!playerName || !roomCode) return;
+        setMode('online');
+        
+        const socket = new WebSocket(`ws://localhost:8000/ws/${roomCode}`);
+        
+        socket.onopen = () => {
+          setConnected(true);
+          socket.send(JSON.stringify({ action: 'join_game', name: playerName }));
+        };
+
+        socket.onmessage = (event) => {
+          const msg = JSON.parse(event.data);
+          console.log('Received:', msg);
+          
+          if (msg.event === 'joined') {
+            setYourPlayerId(msg.data.player_id);
+          } else if (msg.event === 'round_started' || msg.event === 'state_update' || msg.event === 'state') {
+            setGameState(msg.data);
+            setRoundResult(null);
+          } else if (msg.event === 'bid_placed') {
+            // Update highest bid in real-time
+            setGameState(prev => prev ? { ...prev, highest_bid: msg.data.highest_bid, highest_bidder_id: msg.data.highest_bidder_id } : null);
+          } else if (msg.event === 'trump_selected_cards_dealt') {
+            setGameState(prev => prev ? { ...prev, trump_suit: msg.data.suit, phase: 'card_ask' } : null);
+          } else if (msg.event === 'card_played') {
+            // Add card to current trick display
+            setCurrentTrick(prev => [...prev, { player_id: msg.data.player_id, card: msg.data.card }]);
+          } else if (msg.event === 'trick_won') {
+            // Clear trick after short delay
+            setTimeout(() => setCurrentTrick([]), 1500);
+          } else if (msg.event === 'round_ended') {
+            setRoundResult(msg.data);
+            setCurrentTrick([]);
+          } else if (msg.error) {
+            alert(msg.error);
+          }
+        };
+
+        socket.onerror = () => {
+          alert('Failed to connect to server. Make sure the backend is running on localhost:8000');
+          setMode(null);
+        };
+
+        socket.onclose = () => {
+          setConnected(false);
+        };
+
+        setWs(socket);
+      };
+
+      const sendAction = (action, data = {}) => {
+        if (ws && connected) {
+          ws.send(JSON.stringify({ action, ...data }));
+        }
+      };
+
+      const startNewRound = () => {
+        setRoundResult(null);
+        setCurrentTrick([]);
+        // In real implementation, server would handle this
+        // For now just clear the result to continue
+      };
+
+      if (!mode) {
+        return (
+          <div className="game-container">
+            <div className="lobby">
+              <h1>250</h1>
+              <p>Classic 6-player trick-taking card game</p>
+
+              <div className="input-group">
+                <label>Your Name</label>
+                <input 
+                  type="text" 
+                  placeholder="Enter your name"
+                  value={playerName}
+                  onChange={(e) => setPlayerName(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && (roomCode ? joinOnlineGame() : null)}
+                />
+              </div>
+
+              <div className="input-group">
+                <label>Room Code</label>
+                <input 
+                  type="text" 
+                  placeholder="e.g. GAME01"
+                  value={roomCode}
+                  onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
+                  maxLength={8}
+                  onKeyPress={(e) => e.key === 'Enter' && playerName && roomCode && joinOnlineGame()}
+                />
+              </div>
+
+              <button 
+                className="btn" 
+                onClick={joinOnlineGame}
+                disabled={!playerName || !roomCode}
+              >
+                Join Game
+              </button>
+
+              <p style={{ marginTop: '2rem', fontSize: '0.9rem', opacity: 0.7 }}>
+                Make sure the backend server is running:<br/>
+                <code style={{ background: 'rgba(0,0,0,0.3)', padding: '0.25rem 0.5rem', borderRadius: '4px' }}>
+                  uvicorn server:app --reload --port 8000
+                </code>
+              </p>
+            </div>
+          </div>
+        );
+      }
+
+      if (!gameState) {
+        return (
+          <div className="game-container">
+            <div className="lobby">
+              <h1>{connected ? 'Waiting for players...' : 'Connecting...'}</h1>
+              <p>{connected ? `Room: ${roomCode}` : 'Establishing connection...'}</p>
+              {connected && (
+                <p style={{ marginTop: '1rem', opacity: 0.8 }}>
+                  Waiting for 6 players to join. Share the room code: <strong>{roomCode}</strong>
+                </p>
+              )}
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <div className="game-container">
+          <GameTable 
+            gameState={gameState} 
+            yourPlayerId={yourPlayerId}
+            onAction={sendAction}
+            bidAmount={bidAmount}
+            setBidAmount={setBidAmount}
+            selectedCards={selectedCards}
+            setSelectedCards={setSelectedCards}
+            currentTrick={currentTrick}
+            roundResult={roundResult}
+            onNewRound={startNewRound}
+          />
+        </div>
+      );
+    }
+
+    // Game Table Component
+    function GameTable({ gameState, yourPlayerId, onAction, bidAmount, setBidAmount, selectedCards, setSelectedCards, currentTrick, roundResult, onNewRound }) {
+      const you = gameState.players.find(p => p.player_id === yourPlayerId);
+      const others = gameState.players.filter(p => p.player_id !== yourPlayerId);
+      const isYourTurn = gameState.current_turn === yourPlayerId;
+
+      const trickCount = gameState.tricks_played || 0;
+
+      return (
+        <div className="table">
+          <div className="table-top">
+            <div className="game-info">
+              <div className="info-item">
+                <div className="info-label">Trick</div>
+                <div className="info-value">{trickCount + 1} / 8</div>
+              </div>
+              {gameState.highest_bid > 0 && (
+                <div className="info-item">
+                  <div className="info-label">Highest Bid</div>
+                  <div className="info-value">{gameState.highest_bid}</div>
+                </div>
+              )}
+              {gameState.trump_suit && (
+                <div className="info-item">
+                  <div className="info-label">Trump</div>
+                  <div className="info-value" style={{ fontSize: '2rem' }}>{SUITS[gameState.trump_suit]}</div>
+                </div>
+              )}
+            </div>
+            <div className="phase-indicator">{gameState.phase.replace('_', ' ')}</div>
+          </div>
+
+          <div className="seats">
+            {/* Top row: 3 opponents */}
+            {others.slice(0, 3).map((player, idx) => (
+              <PlayerSeat key={player.player_id} player={player} position={`top-${idx}`} gameState={gameState} />
+            ))}
+
+            {/* Middle row: trick area */}
+            <div className="trick-area">
+              <div className="trick-cards">
+                {currentTrick.map((play, idx) => {
+                  const { rank, suit } = parseCard(play.card);
+                  return (
+                    <div key={idx} style={{ position: 'relative' }}>
+                      <Card cardId={play.card} />
+                      <div style={{ 
+                        fontSize: '0.7rem', 
+                        textAlign: 'center', 
+                        marginTop: '0.25rem',
+                        opacity: 0.8
+                      }}>
+                        {gameState.players.find(p => p.player_id === play.player_id)?.name}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {currentTrick.length === 0 && gameState.phase === 'playing' && (
+                <div className="trick-info">
+                  {isYourTurn ? "Your turn" : `Waiting for ${gameState.players.find(p => p.player_id === gameState.current_turn)?.name}...`}
+                </div>
+              )}
+            </div>
+
+            {/* Bottom row: 2 opponents + you */}
+            {others.slice(3).map((player, idx) => (
+              <PlayerSeat key={player.player_id} player={player} position={`bottom-${idx}`} gameState={gameState} />
+            ))}
+            
+            <div className={`seat you ${isYourTurn ? 'current-turn' : ''}`}>
+              <div className="seat-header">
+                <span className="player-name">{you.name} (You)</span>
+                <span className="player-score">{gameState.scores[yourPlayerId]}</span>
+              </div>
+              {you.bid !== null && you.bid !== undefined && (
+                <div className="player-bid">Bid: {you.bid === 0 ? 'Passed' : you.bid}</div>
+              )}
+              <div className="hand">
+                {(gameState.your_hand || []).map(cardId => (
+                  <Card 
+                    key={cardId} 
+                    cardId={cardId} 
+                    onClick={() => {
+                      if (gameState.phase === 'playing' && isYourTurn) {
+                        onAction('play_card', { card_id: cardId });
+                      }
+                    }}
+                    disabled={!isYourTurn || gameState.phase !== 'playing'}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Bidding Panel */}
+          {gameState.phase === 'bidding' && isYourTurn && (
+            <BiddingPanel 
+              currentBid={gameState.highest_bid}
+              players={gameState.players}
+              onBid={(amount) => {
+                onAction('place_bid', { amount });
+                setBidAmount('');
+              }}
+              onPass={() => onAction('place_bid', { amount: null })}
+              bidAmount={bidAmount}
+              setBidAmount={setBidAmount}
+            />
+          )}
+
+          {/* Trump Selector */}
+          {gameState.phase === 'trump_select' && gameState.highest_bidder_id === yourPlayerId && (
+            <TrumpSelector onSelect={(suit) => onAction('select_trump', { suit })} />
+          )}
+
+          {/* Card Selector */}
+          {gameState.phase === 'card_ask' && gameState.highest_bidder_id === yourPlayerId && (
+            <CardSelector 
+              hand={gameState.your_hand || []}
+              selected={selectedCards}
+              onSelect={setSelectedCards}
+              onConfirm={() => {
+                onAction('ask_for_cards', { card_ids: selectedCards });
+                setSelectedCards([]);
+              }}
+            />
+          )}
+
+          {/* Round Result */}
+          {roundResult && (
+            <RoundResult result={roundResult} players={gameState.players} onClose={onNewRound} />
+          )}
+
+          {/* Scoreboard */}
+          <Scoreboard players={gameState.players} scores={gameState.scores} />
+        </div>
+      );
+    }
+
+    // Player Seat Component
+    function PlayerSeat({ player, gameState }) {
+      const isCurrentTurn = gameState.current_turn === player.player_id;
+      
+      return (
+        <div className={`seat ${isCurrentTurn ? 'current-turn' : ''}`}>
+          <div className="seat-header">
+            <span className="player-name">{player.name}</span>
+            <span className="player-score">{gameState.scores[player.player_id] || 0}</span>
+          </div>
+          {player.bid !== null && player.bid !== undefined && (
+            <div className="player-bid">Bid: {player.bid === 0 ? 'Passed' : player.bid}</div>
+          )}
+          <div className="hand">
+            {Array(player.hand_size || 0).fill(0).map((_, i) => (
+              <div key={i} className="card card-back"></div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // Card Component
+    function Card({ cardId, onClick, disabled, selectable, selected }) {
+      const { rank, suit } = parseCard(cardId);
+      const points = getCardPoints(rank, suit);
+      const color = SUIT_COLORS[suit];
+      
+      return (
+        <div 
+          className={`card ${color} ${disabled ? 'disabled' : ''} ${selectable ? 'selectable-card' : ''} ${selected ? 'selected' : ''}`}
+          onClick={onClick}
+        >
+          <div className="card-rank">{rank}</div>
+          <div className="card-suit">{SUITS[suit]}</div>
+          {points > 0 && <div className="card-points">{points}</div>}
+        </div>
+      );
+    }
+
+    // Bidding Panel Component
+    function BiddingPanel({ currentBid, players, onBid, onPass, bidAmount, setBidAmount }) {
+      const minBid = currentBid + 1;
+      
+      return (
+        <div className="bidding-panel">
+          <h3>Your Bid</h3>
+          <p style={{ textAlign: 'center', marginBottom: '1rem' }}>
+            Current highest: {currentBid || 'None'}
+          </p>
+          <div className="bid-input">
+            <input 
+              type="number" 
+              placeholder={`Min: ${minBid}`}
+              value={bidAmount}
+              onChange={(e) => setBidAmount(e.target.value)}
+              onKeyPress={(e) => {
+                if (e.key === 'Enter' && bidAmount && parseInt(bidAmount) >= minBid) {
+                  onBid(parseInt(bidAmount));
+                }
+              }}
+              min={minBid}
+              max={250}
+            />
+          </div>
+          <div className="bid-actions">
+            <button className="btn" onClick={onPass}>Pass</button>
+            <button 
+              className="btn" 
+              onClick={() => onBid(parseInt(bidAmount))}
+              disabled={!bidAmount || parseInt(bidAmount) < minBid}
+            >
+              Bid {bidAmount || ''}
+            </button>
+          </div>
+
+          <div className="bid-history">
+            <div style={{ fontSize: '0.85rem', opacity: 0.7, marginBottom: '0.5rem' }}>Bids so far:</div>
+            {players.filter(p => p.bid !== null && p.bid !== undefined).map(p => (
+              <div key={p.player_id} className="bid-entry">
+                <span>{p.name}</span>
+                <span style={{ fontWeight: 'bold', color: 'var(--gold)' }}>
+                  {p.bid === 0 ? 'Passed' : p.bid}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // Trump Selector Component
+    function TrumpSelector({ onSelect }) {
+      return (
+        <div className="bidding-panel">
+          <h3>Select Trump Suit</h3>
+          <div className="trump-selector">
+            {Object.entries(SUITS).map(([suit, symbol]) => (
+              <button 
+                key={suit}
+                className="suit-btn"
+                onClick={() => onSelect(suit)}
+                style={{ color: SUIT_COLORS[suit] === 'red' ? '#c41e3a' : '#1a1a1a' }}
+              >
+                {symbol}
+              </button>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // Card Selector Component
+    function CardSelector({ hand, selected, onSelect, onConfirm }) {
+      const toggleCard = (cardId) => {
+        if (selected.includes(cardId)) {
+          onSelect(selected.filter(id => id !== cardId));
+        } else if (selected.length < 2) {
+          onSelect([...selected, cardId]);
+        }
+      };
+
+      // Generate all cards except Ace of Spades and cards in your hand
+      const selectableCards = generateAllSelectableCards(hand);
+
+      return (
+        <div className="bidding-panel" style={{ minWidth: '600px', maxWidth: '800px' }}>
+          <h3>Ask for 2 Cards</h3>
+          <p style={{ textAlign: 'center', marginBottom: '1rem', opacity: 0.8 }}>
+            Select 2 cards you don't have. Players holding them will be your teammates.
+          </p>
+          <div className="card-selector">
+            <div className="card-grid">
+              {selectableCards.map(cardId => (
+                <Card
+                  key={cardId}
+                  cardId={cardId}
+                  selectable
+                  selected={selected.includes(cardId)}
+                  onClick={() => toggleCard(cardId)}
+                />
+              ))}
+            </div>
+          </div>
+          <div className="selected-count">
+            Selected: {selected.length} / 2
+          </div>
+          <button 
+            className="btn" 
+            style={{ width: '100%', marginTop: '1rem' }}
+            onClick={onConfirm}
+            disabled={selected.length !== 2}
+          >
+            Confirm Selection
+          </button>
+        </div>
+      );
+    }
+
+    // Round Result Component
+    function RoundResult({ result, players, onClose }) {
+      const bidderName = players.find(p => p.player_id === result.bidder_id)?.name;
+      
+      return (
+        <div className="bidding-panel" style={{ minWidth: '600px' }}>
+          <h3>Round Complete</h3>
+          
+          <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+            <div style={{ fontSize: '1.1rem', marginBottom: '0.5rem' }}>
+              <strong>{bidderName}</strong> bid <strong>{result.bid}</strong>
+            </div>
+            <div style={{ 
+              fontSize: '1.3rem', 
+              fontWeight: 'bold',
+              color: result.bidder_team_won ? '#4ade80' : '#ef4444',
+              marginTop: '0.5rem'
+            }}>
+              {result.bidder_team_won ? '✓ Bidder Team Wins!' : '✗ Bidder Team Failed'}
+            </div>
+          </div>
+
+          <div style={{ 
+            display: 'grid', 
+            gridTemplateColumns: '1fr 1fr', 
+            gap: '1rem',
+            marginBottom: '1.5rem'
+          }}>
+            <div style={{ 
+              padding: '1rem', 
+              background: 'rgba(0, 0, 0, 0.3)', 
+              borderRadius: '8px',
+              textAlign: 'center'
+            }}>
+              <div style={{ fontSize: '0.85rem', opacity: 0.7 }}>Bidder Team</div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--gold)' }}>
+                {result.bidder_team_points}
+              </div>
+              <div style={{ fontSize: '0.8rem', marginTop: '0.25rem' }}>
+                (needed {result.bid})
+              </div>
+            </div>
+            <div style={{ 
+              padding: '1rem', 
+              background: 'rgba(0, 0, 0, 0.3)', 
+              borderRadius: '8px',
+              textAlign: 'center'
+            }}>
+              <div style={{ fontSize: '0.85rem', opacity: 0.7 }}>Opponents</div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--gold)' }}>
+                {result.opponent_team_points}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ 
+            padding: '1rem', 
+            background: 'rgba(0, 0, 0, 0.2)', 
+            borderRadius: '8px',
+            marginBottom: '1.5rem'
+          }}>
+            <div style={{ fontSize: '0.9rem', fontWeight: 'bold', marginBottom: '0.5rem' }}>
+              Team Reveal
+            </div>
+            {Object.entries(result.team_revealed).map(([pid, team]) => {
+              const player = players.find(p => p.player_id === pid);
+              const role = pid === result.bidder_id ? '★ Bidder' : 
+                          team === 'bidder_team' ? 'Teammate' : 'Opponent';
+              const scoreChange = result.bidder_team_won 
+                ? (pid === result.bidder_id ? '+2' : team === 'bidder_team' ? '+1' : '0')
+                : (pid === result.bidder_id ? '-1' : team === 'bidder_team' ? '0' : '+1');
+              
+              return (
+                <div key={pid} style={{ 
+                  display: 'flex', 
+                  justifyContent: 'space-between',
+                  padding: '0.5rem',
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  borderRadius: '4px',
+                  marginBottom: '0.25rem'
+                }}>
+                  <span>{player?.name}</span>
+                  <span style={{ opacity: 0.7 }}>{role}</span>
+                  <span style={{ 
+                    fontWeight: 'bold',
+                    color: scoreChange.startsWith('+') ? '#4ade80' : 
+                           scoreChange.startsWith('-') ? '#ef4444' : 'inherit'
+                  }}>
+                    {scoreChange}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          <button className="btn" style={{ width: '100%' }} onClick={onClose}>
+            Continue
+          </button>
+        </div>
+      );
+    }
+
+    // Scoreboard Component
+    function Scoreboard({ players, scores }) {
+      const sorted = [...players].sort((a, b) => 
+        (scores[b.player_id] || 0) - (scores[a.player_id] || 0)
+      );
+
+      return (
+        <div className="scoreboard">
+          <h3>Scoreboard</h3>
+          <div className="score-table">
+            <div className="score-header">Player</div>
+            <div className="score-header">Score</div>
+            <div className="score-header">Tricks</div>
+            
+            {sorted.map(player => (
+              <div key={player.player_id} className="score-row">
+                <div className="score-cell" style={{ textAlign: 'left' }}>
+                  {player.name}
+                </div>
+                <div className="score-cell" style={{ 
+                  fontWeight: 'bold',
+                  fontFamily: "'Courier New', monospace",
+                  color: 'var(--gold)'
+                }}>
+                  {scores[player.player_id] >= 0 ? '+' : ''}{scores[player.player_id] || 0}
+                </div>
+                <div className="score-cell">
+                  {player.tricks_won || 0}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // Render App
+    ReactDOM.render(<App />, document.getElementById('root'));
+  </script>
+</body>
+</html>
