@@ -411,17 +411,15 @@
 
     /* Bidding Panel */
     .bidding-panel {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
       background: rgba(13, 95, 58, 0.98);
       border: 4px solid var(--gold);
       border-radius: 12px;
       padding: 2rem;
-      min-width: 400px;
+      min-width: 340px;
+      max-width: 420px;
       box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
       z-index: 100;
+      flex-shrink: 0;
     }
 
     .bidding-panel h3 {
@@ -645,57 +643,480 @@
       return allCards;
     }
 
-    // Main App Component
+    // ─────────────────────────────────────────────
+    // BOT GAME ENGINE
+    // ─────────────────────────────────────────────
+
+    const RANK_ORDER = ['3','4','5','6','7','8','9','10','J','Q','K','A'];
+
+    function shuffle(arr) {
+      const a = [...arr];
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    }
+
+    function buildDeck() {
+      const deck = [];
+      Object.keys(SUITS).forEach(suit => {
+        RANK_ORDER.forEach(rank => deck.push(`${rank}_${suit}`));
+      });
+      return deck;
+    }
+
+    function dealCards() {
+      // 48 cards (remove 2♠, 3♠, 4♠, 5♠ → keep full deck of 48 for 6×8)
+      // Actually standard 250: use full 52-card deck, deal 8 each + 4 kitty
+      const deck = shuffle(buildDeck());
+      const hands = [];
+      for (let i = 0; i < 6; i++) hands.push(deck.slice(i * 8, i * 8 + 8));
+      const kitty = deck.slice(48); // last 4 cards (unused / kitty, not shown)
+      return hands;
+    }
+
+    function cardStrength(cardId, leadSuit, trumpSuit) {
+      const { rank, suit } = parseCard(cardId);
+      if (suit === trumpSuit) return 100 + RANK_ORDER.indexOf(rank);
+      if (suit === leadSuit)  return  50 + RANK_ORDER.indexOf(rank);
+      return RANK_ORDER.indexOf(rank); // off-suit, lowest priority
+    }
+
+    function trickWinner(trick, trumpSuit) {
+      const leadSuit = parseCard(trick[0].card).suit;
+      let best = trick[0];
+      for (let i = 1; i < trick.length; i++) {
+        if (cardStrength(trick[i].card, leadSuit, trumpSuit) >
+            cardStrength(best.card, leadSuit, trumpSuit)) {
+          best = trick[i];
+        }
+      }
+      return best.player_id;
+    }
+
+    function trickPoints(trick) {
+      return trick.reduce((sum, play) => {
+        const { rank, suit } = parseCard(play.card);
+        return sum + getCardPoints(rank, suit);
+      }, 0);
+    }
+
+    // Bot bidding: count high-point cards
+    function botBid(hand, currentHighest) {
+      const handPoints = hand.reduce((s, c) => {
+        const { rank, suit } = parseCard(c);
+        return s + getCardPoints(rank, suit);
+      }, 0);
+      const aces = hand.filter(c => parseCard(c).rank === 'A').length;
+      const threshold = 120 - aces * 15;
+      if (handPoints >= threshold && currentHighest < 160) {
+        const bid = Math.max(currentHighest + 5, 130);
+        return Math.min(bid, 160);
+      }
+      return 0; // pass
+    }
+
+    // Bot card play: lead highest trump if any, else follow suit, else discard lowest
+    function botPlayCard(hand, trickSoFar, trumpSuit) {
+      const leadSuit = trickSoFar.length > 0 ? parseCard(trickSoFar[0].card).suit : null;
+
+      if (!leadSuit) {
+        // Bot is leading — play highest trump or highest card
+        const trumps = hand.filter(c => parseCard(c).suit === trumpSuit);
+        const pool = trumps.length > 0 ? trumps : hand;
+        return pool.reduce((best, c) =>
+          RANK_ORDER.indexOf(parseCard(c).rank) > RANK_ORDER.indexOf(parseCard(best).rank) ? c : best
+        );
+      }
+
+      // Must follow suit if possible
+      const followable = hand.filter(c => parseCard(c).suit === leadSuit);
+      if (followable.length > 0) {
+        return followable.reduce((best, c) =>
+          RANK_ORDER.indexOf(parseCard(c).rank) > RANK_ORDER.indexOf(parseCard(best).rank) ? c : best
+        );
+      }
+
+      // Can't follow — play trump if available
+      const trumps = hand.filter(c => parseCard(c).suit === trumpSuit);
+      if (trumps.length > 0) {
+        return trumps.reduce((best, c) =>
+          RANK_ORDER.indexOf(parseCard(c).rank) > RANK_ORDER.indexOf(parseCard(best).rank) ? c : best
+        );
+      }
+
+      // Discard lowest value card
+      return hand.reduce((worst, c) => {
+        const wScore = getCardPoints(parseCard(worst).rank, parseCard(worst).suit) * 10 + RANK_ORDER.indexOf(parseCard(worst).rank);
+        const cScore = getCardPoints(parseCard(c).rank, parseCard(c).suit) * 10 + RANK_ORDER.indexOf(parseCard(c).rank);
+        return cScore < wScore ? c : worst;
+      });
+    }
+
+    // Bot trump selection: pick the suit it has most of
+    function botSelectTrump(hand) {
+      const counts = {};
+      Object.keys(SUITS).forEach(s => counts[s] = 0);
+      hand.forEach(c => counts[parseCard(c).suit]++);
+      return Object.entries(counts).reduce((a, b) => b[1] > a[1] ? b : a)[0];
+    }
+
+    // Bot card ask: pick 2 cards not in hand with highest value
+    function botAskCards(hand) {
+      const all = generateAllSelectableCards(hand);
+      return all
+        .sort((a, b) => {
+          const pa = getCardPoints(parseCard(a).rank, parseCard(a).suit);
+          const pb = getCardPoints(parseCard(b).rank, parseCard(b).suit);
+          return pb - pa;
+        })
+        .slice(0, 2);
+    }
+
+    function initBotGame(humanName) {
+      const BOT_NAMES = ['Arjun', 'Priya', 'Rahul', 'Meena', 'Vikram'];
+      const players = [
+        { player_id: 'p0', name: humanName, is_bot: false, bid: null, hand_size: 8, tricks_won: 0 },
+        ...BOT_NAMES.map((n, i) => ({ player_id: `p${i+1}`, name: n, is_bot: true, bid: null, hand_size: 8, tricks_won: 0 }))
+      ];
+
+      const hands = dealCards();
+      const scores = {};
+      players.forEach(p => scores[p.player_id] = 0);
+
+      return {
+        players,
+        hands,       // array indexed by player index (0-5)
+        scores,
+        phase: 'bidding',
+        current_turn: 'p0',
+        highest_bid: 0,
+        highest_bidder_id: null,
+        trump_suit: null,
+        tricks_played: 0,
+        your_hand: hands[0],
+        trick_points: {},  // accumulated per player
+        bidder_team: [],
+        opponent_team: [],
+      };
+    }
+
+    // ─────────────────────────────────────────────
+    // MAIN APP COMPONENT
+    // ─────────────────────────────────────────────
     function App() {
-      const [mode, setMode] = useState(null); // 'bot' or 'online'
+      const [mode, setMode] = useState(null);
       const [gameState, setGameState] = useState(null);
       const [playerName, setPlayerName] = useState('');
       const [roomCode, setRoomCode] = useState('');
-      const [yourPlayerId, setYourPlayerId] = useState(null);
+      const [yourPlayerId] = useState('p0');
       const [ws, setWs] = useState(null);
       const [bidAmount, setBidAmount] = useState('');
       const [selectedCards, setSelectedCards] = useState([]);
       const [currentTrick, setCurrentTrick] = useState([]);
       const [roundResult, setRoundResult] = useState(null);
       const [connected, setConnected] = useState(false);
+      const botTimerRef = useRef(null);
 
       useEffect(() => {
         return () => {
           if (ws) ws.close();
+          if (botTimerRef.current) clearTimeout(botTimerRef.current);
         };
       }, [ws]);
 
-      // Online mode: connect to WebSocket
+      // ── BOT TURN SCHEDULER ──
+      useEffect(() => {
+        if (mode !== 'bot' || !gameState) return;
+        if (gameState.current_turn === 'p0') return; // human's turn
+        if (gameState.phase === 'card_ask' && gameState.highest_bidder_id === 'p0') return;
+        if (gameState.phase === 'trump_select' && gameState.highest_bidder_id === 'p0') return;
+
+        botTimerRef.current = setTimeout(() => {
+          handleBotAction(gameState);
+        }, 900);
+
+        return () => clearTimeout(botTimerRef.current);
+      }, [gameState, mode]);
+
+      const handleBotAction = (gs) => {
+        const pidIndex = (pid) => parseInt(pid.slice(1));
+        const currentIdx = pidIndex(gs.current_turn);
+
+        if (gs.phase === 'bidding') {
+          const hand = gs.hands[currentIdx];
+          const bid = botBid(hand, gs.highest_bid);
+          handleBotBid(gs, gs.current_turn, bid);
+        } else if (gs.phase === 'trump_select') {
+          const hand = gs.hands[currentIdx];
+          const suit = botSelectTrump(hand);
+          applyTrumpSelect(gs, suit);
+        } else if (gs.phase === 'card_ask') {
+          const hand = gs.hands[currentIdx];
+          const cards = botAskCards(hand);
+          applyCardAsk(gs, cards);
+        } else if (gs.phase === 'playing') {
+          const hand = gs.hands[currentIdx];
+          const card = botPlayCard(hand, currentTrick, gs.trump_suit);
+          applyCardPlay(gs, gs.current_turn, card, currentTrick);
+        }
+      };
+
+      // ── BIDDING PHASE ──
+      const handleBotBid = (gs, playerId, amount) => {
+        const players = gs.players.map(p =>
+          p.player_id === playerId ? { ...p, bid: amount } : p
+        );
+        let highest_bid = gs.highest_bid;
+        let highest_bidder_id = gs.highest_bidder_id;
+        if (amount > highest_bid) {
+          highest_bid = amount;
+          highest_bidder_id = playerId;
+        }
+
+        const pidIndex = (pid) => parseInt(pid.slice(1));
+        const allBidded = players.every(p => p.bid !== null);
+
+        if (allBidded) {
+          // Bidding done — move to trump select
+          const winnerIdx = pidIndex(highest_bidder_id);
+          const nextTurn = highest_bidder_id;
+          setGameState({ ...gs, players, highest_bid, highest_bidder_id, phase: 'trump_select', current_turn: nextTurn });
+        } else {
+          // Next player
+          const nextIdx = (pidIndex(playerId) + 1) % 6;
+          // Skip already-bidded players (shouldn't happen in first round)
+          setGameState({ ...gs, players, highest_bid, highest_bidder_id, current_turn: `p${nextIdx}` });
+        }
+      };
+
+      const handleHumanBid = (amount) => {
+        if (!gameState || gameState.phase !== 'bidding' || gameState.current_turn !== 'p0') return;
+        handleBotBid(gameState, 'p0', amount || 0);
+        setBidAmount('');
+      };
+
+      // ── TRUMP SELECT PHASE ──
+      const applyTrumpSelect = (gs, suit) => {
+        const nextTurn = gs.highest_bidder_id;
+        setGameState({ ...gs, trump_suit: suit, phase: 'card_ask', current_turn: nextTurn });
+      };
+
+      // ── CARD ASK PHASE ──
+      const applyCardAsk = (gs, askedCards) => {
+        const pidIndex = (pid) => parseInt(pid.slice(1));
+        const bidderIdx = pidIndex(gs.highest_bidder_id);
+
+        // Find which players hold those cards
+        let newHands = gs.hands.map(h => [...h]);
+        let teammates = [gs.highest_bidder_id];
+
+        askedCards.forEach(cardId => {
+          for (let i = 0; i < 6; i++) {
+            if (i !== bidderIdx && newHands[i].includes(cardId)) {
+              teammates.push(`p${i}`);
+              break;
+            }
+          }
+        });
+
+        const uniqueTeammates = [...new Set(teammates)];
+        const opponentTeam = gs.players
+          .map(p => p.player_id)
+          .filter(pid => !uniqueTeammates.includes(pid));
+
+        // Start playing phase — bidder leads
+        setGameState({
+          ...gs,
+          hands: newHands,
+          your_hand: newHands[0],
+          phase: 'playing',
+          current_turn: gs.highest_bidder_id,
+          bidder_team: uniqueTeammates,
+          opponent_team: opponentTeam,
+          trick_points: Object.fromEntries(gs.players.map(p => [p.player_id, 0])),
+        });
+        setCurrentTrick([]);
+      };
+
+      // ── PLAYING PHASE ──
+      const applyCardPlay = (gs, playerId, cardId, trick) => {
+        const pidIndex = (pid) => parseInt(pid.slice(1));
+        const idx = pidIndex(playerId);
+        const newHands = gs.hands.map(h => [...h]);
+        newHands[idx] = newHands[idx].filter(c => c !== cardId);
+
+        const newTrick = [...trick, { player_id: playerId, card: cardId }];
+
+        const updatedPlayers = gs.players.map(p =>
+          p.player_id === playerId
+            ? { ...p, hand_size: newHands[pidIndex(p.player_id)].length }
+            : p
+        );
+
+        setCurrentTrick(newTrick);
+
+        if (newTrick.length === 6) {
+          // Trick complete
+          const winnerId = trickWinner(newTrick, gs.trump_suit);
+          const pts = trickPoints(newTrick);
+
+          const trick_points = { ...gs.trick_points, [winnerId]: (gs.trick_points[winnerId] || 0) + pts };
+          const tricks_played = gs.tricks_played + 1;
+
+          const newGsPlayers = updatedPlayers.map(p =>
+            p.player_id === winnerId ? { ...p, tricks_won: (p.tricks_won || 0) + 1 } : p
+          );
+
+          setTimeout(() => {
+            setCurrentTrick([]);
+
+            if (tricks_played >= 8) {
+              // Round over
+              const bidderTeamPoints = gs.bidder_team.reduce((s, pid) => s + (trick_points[pid] || 0), 0);
+              const opponentPoints = gs.opponent_team.reduce((s, pid) => s + (trick_points[pid] || 0), 0);
+              const bidderTeamWon = bidderTeamPoints >= gs.highest_bid;
+
+              const newScores = { ...gs.scores };
+              gs.bidder_team.forEach(pid => {
+                newScores[pid] = (newScores[pid] || 0) + (bidderTeamWon ? (pid === gs.highest_bidder_id ? 2 : 1) : (pid === gs.highest_bidder_id ? -1 : 0));
+              });
+              gs.opponent_team.forEach(pid => {
+                newScores[pid] = (newScores[pid] || 0) + (bidderTeamWon ? 0 : 1);
+              });
+
+              const teamRevealed = {};
+              gs.players.forEach(p => {
+                teamRevealed[p.player_id] = gs.bidder_team.includes(p.player_id) ? 'bidder_team' : 'opponent_team';
+              });
+
+              setRoundResult({
+                bid: gs.highest_bid,
+                bidder_id: gs.highest_bidder_id,
+                bidder_team_won: bidderTeamWon,
+                bidder_team_points: bidderTeamPoints,
+                opponent_team_points: opponentPoints,
+                team_revealed: teamRevealed,
+              });
+
+              setGameState({
+                ...gs,
+                hands: newHands,
+                your_hand: newHands[0],
+                players: newGsPlayers,
+                trick_points,
+                tricks_played,
+                scores: newScores,
+                phase: 'round_over',
+              });
+            } else {
+              setGameState({
+                ...gs,
+                hands: newHands,
+                your_hand: newHands[0],
+                players: newGsPlayers,
+                trick_points,
+                tricks_played,
+                current_turn: winnerId,
+                phase: 'playing',
+              });
+            }
+          }, 1400);
+
+          // Temporarily freeze turns while trick resolves
+          setGameState(prev => ({
+            ...prev,
+            hands: newHands,
+            your_hand: newHands[0],
+            players: updatedPlayers,
+            trick_points,
+          }));
+        } else {
+          // Next player
+          const nextIdx = (idx + 1) % 6;
+          setGameState({
+            ...gs,
+            hands: newHands,
+            your_hand: newHands[0],
+            players: updatedPlayers,
+            current_turn: `p${nextIdx}`,
+          });
+        }
+      };
+
+      const handleHumanPlayCard = (cardId) => {
+        if (!gameState || gameState.phase !== 'playing' || gameState.current_turn !== 'p0') return;
+        applyCardPlay(gameState, 'p0', cardId, currentTrick);
+      };
+
+      // ── BOT MODE sendAction router ──
+      const sendBotAction = (action, data = {}) => {
+        if (action === 'place_bid') handleHumanBid(data.amount);
+        else if (action === 'select_trump') applyTrumpSelect(gameState, data.suit);
+        else if (action === 'ask_for_cards') applyCardAsk(gameState, data.card_ids);
+        else if (action === 'play_card') handleHumanPlayCard(data.card_id);
+      };
+
+      // ── START BOT GAME ──
+      const startBotGame = () => {
+        if (!playerName) return;
+        const gs = initBotGame(playerName);
+        setGameState(gs);
+        setMode('bot');
+        setCurrentTrick([]);
+        setRoundResult(null);
+      };
+
+      // ── START NEW ROUND (bot) ──
+      const startNewBotRound = () => {
+        if (!gameState) return;
+        const hands = dealCards();
+        const players = gameState.players.map((p, i) => ({
+          ...p, bid: null, hand_size: 8, tricks_won: 0
+        }));
+        setGameState({
+          ...gameState,
+          players,
+          hands,
+          your_hand: hands[0],
+          phase: 'bidding',
+          current_turn: 'p0',
+          highest_bid: 0,
+          highest_bidder_id: null,
+          trump_suit: null,
+          tricks_played: 0,
+          trick_points: {},
+          bidder_team: [],
+          opponent_team: [],
+        });
+        setRoundResult(null);
+        setCurrentTrick([]);
+      };
+
+      // ── ONLINE MODE ──
       const joinOnlineGame = () => {
         if (!playerName || !roomCode) return;
         setMode('online');
-        
         const socket = new WebSocket(`ws://localhost:8000/ws/${roomCode}`);
-        
         socket.onopen = () => {
           setConnected(true);
           socket.send(JSON.stringify({ action: 'join_game', name: playerName }));
         };
-
         socket.onmessage = (event) => {
           const msg = JSON.parse(event.data);
-          console.log('Received:', msg);
-          
           if (msg.event === 'joined') {
-            setYourPlayerId(msg.data.player_id);
+            // yourPlayerId from server — for online we use server-assigned id
           } else if (msg.event === 'round_started' || msg.event === 'state_update' || msg.event === 'state') {
             setGameState(msg.data);
             setRoundResult(null);
           } else if (msg.event === 'bid_placed') {
-            // Update highest bid in real-time
             setGameState(prev => prev ? { ...prev, highest_bid: msg.data.highest_bid, highest_bidder_id: msg.data.highest_bidder_id } : null);
           } else if (msg.event === 'trump_selected_cards_dealt') {
             setGameState(prev => prev ? { ...prev, trump_suit: msg.data.suit, phase: 'card_ask' } : null);
           } else if (msg.event === 'card_played') {
-            // Add card to current trick display
             setCurrentTrick(prev => [...prev, { player_id: msg.data.player_id, card: msg.data.card }]);
           } else if (msg.event === 'trick_won') {
-            // Clear trick after short delay
             setTimeout(() => setCurrentTrick([]), 1500);
           } else if (msg.event === 'round_ended') {
             setRoundResult(msg.data);
@@ -704,32 +1125,21 @@
             alert(msg.error);
           }
         };
-
         socket.onerror = () => {
           alert('Failed to connect to server. Make sure the backend is running on localhost:8000');
           setMode(null);
         };
-
-        socket.onclose = () => {
-          setConnected(false);
-        };
-
+        socket.onclose = () => setConnected(false);
         setWs(socket);
       };
 
-      const sendAction = (action, data = {}) => {
-        if (ws && connected) {
-          ws.send(JSON.stringify({ action, ...data }));
-        }
+      const sendOnlineAction = (action, data = {}) => {
+        if (ws && connected) ws.send(JSON.stringify({ action, ...data }));
       };
 
-      const startNewRound = () => {
-        setRoundResult(null);
-        setCurrentTrick([]);
-        // In real implementation, server would handle this
-        // For now just clear the result to continue
-      };
+      const sendAction = mode === 'bot' ? sendBotAction : sendOnlineAction;
 
+      // ── LOBBY ──
       if (!mode) {
         return (
           <div className="game-container">
@@ -739,19 +1149,30 @@
 
               <div className="input-group">
                 <label>Your Name</label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   placeholder="Enter your name"
                   value={playerName}
                   onChange={(e) => setPlayerName(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && (roomCode ? joinOnlineGame() : null)}
                 />
               </div>
 
-              <div className="input-group">
+              {/* Bot Mode */}
+              <button
+                className="btn"
+                style={{ width: '100%', marginBottom: '1rem', background: 'var(--felt-dark)', border: '2px solid var(--gold)' }}
+                onClick={startBotGame}
+                disabled={!playerName}
+              >
+                🤖 Play vs Bots (Local)
+              </button>
+
+              <div style={{ textAlign: 'center', opacity: 0.5, margin: '0.5rem 0', fontSize: '0.9rem' }}>— or play online —</div>
+
+              <div className="input-group" style={{ marginTop: '0.75rem' }}>
                 <label>Room Code</label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   placeholder="e.g. GAME01"
                   value={roomCode}
                   onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
@@ -760,16 +1181,17 @@
                 />
               </div>
 
-              <button 
-                className="btn" 
+              <button
+                className="btn"
                 onClick={joinOnlineGame}
                 disabled={!playerName || !roomCode}
+                style={{ width: '100%' }}
               >
-                Join Game
+                🌐 Join Online Game
               </button>
 
-              <p style={{ marginTop: '2rem', fontSize: '0.9rem', opacity: 0.7 }}>
-                Make sure the backend server is running:<br/>
+              <p style={{ marginTop: '1.5rem', fontSize: '0.85rem', opacity: 0.6 }}>
+                Online requires backend:<br/>
                 <code style={{ background: 'rgba(0,0,0,0.3)', padding: '0.25rem 0.5rem', borderRadius: '4px' }}>
                   uvicorn server:app --reload --port 8000
                 </code>
@@ -779,7 +1201,8 @@
         );
       }
 
-      if (!gameState) {
+      // ── ONLINE WAITING ROOM ──
+      if (mode === 'online' && !gameState) {
         return (
           <div className="game-container">
             <div className="lobby">
@@ -787,7 +1210,7 @@
               <p>{connected ? `Room: ${roomCode}` : 'Establishing connection...'}</p>
               {connected && (
                 <p style={{ marginTop: '1rem', opacity: 0.8 }}>
-                  Waiting for 6 players to join. Share the room code: <strong>{roomCode}</strong>
+                  Share room code: <strong>{roomCode}</strong>
                 </p>
               )}
             </div>
@@ -797,8 +1220,20 @@
 
       return (
         <div className="game-container">
-          <GameTable 
-            gameState={gameState} 
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+            <span style={{ fontSize: '0.85rem', opacity: 0.6 }}>
+              {mode === 'bot' ? '🤖 Bot Game' : `🌐 Online · ${roomCode}`}
+            </span>
+            <button
+              className="btn"
+              style={{ padding: '0.4rem 0.9rem', fontSize: '0.85rem' }}
+              onClick={() => { setMode(null); setGameState(null); setRoundResult(null); setCurrentTrick([]); }}
+            >
+              ← Lobby
+            </button>
+          </div>
+          <GameTable
+            gameState={gameState}
             yourPlayerId={yourPlayerId}
             onAction={sendAction}
             bidAmount={bidAmount}
@@ -807,7 +1242,7 @@
             setSelectedCards={setSelectedCards}
             currentTrick={currentTrick}
             roundResult={roundResult}
-            onNewRound={startNewRound}
+            onNewRound={mode === 'bot' ? startNewBotRound : () => { setRoundResult(null); setCurrentTrick([]); }}
           />
         </div>
       );
@@ -815,14 +1250,16 @@
 
     // Game Table Component
     function GameTable({ gameState, yourPlayerId, onAction, bidAmount, setBidAmount, selectedCards, setSelectedCards, currentTrick, roundResult, onNewRound }) {
-      const you = gameState.players.find(p => p.player_id === yourPlayerId);
-      const others = gameState.players.filter(p => p.player_id !== yourPlayerId);
-      const isYourTurn = gameState.current_turn === yourPlayerId;
+      const effectiveYourId = yourPlayerId || gameState.players[0]?.player_id;
+      const you = gameState.players.find(p => p.player_id === effectiveYourId) || gameState.players[0];
+      const others = gameState.players.filter(p => p.player_id !== effectiveYourId);
+      const isYourTurn = gameState.current_turn === effectiveYourId;
 
       const trickCount = gameState.tricks_played || 0;
 
       return (
-        <div className="table">
+        <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'flex-start' }}>
+        <div className="table" style={{ flex: 1, minWidth: 0 }}>
           <div className="table-top">
             <div className="game-info">
               <div className="info-item">
@@ -886,7 +1323,7 @@
             <div className={`seat you ${isYourTurn ? 'current-turn' : ''}`}>
               <div className="seat-header">
                 <span className="player-name">{you.name} (You)</span>
-                <span className="player-score">{gameState.scores[yourPlayerId]}</span>
+                <span className="player-score">{gameState.scores[effectiveYourId]}</span>
               </div>
               {you.bid !== null && you.bid !== undefined && (
                 <div className="player-bid">Bid: {you.bid === 0 ? 'Passed' : you.bid}</div>
@@ -908,9 +1345,13 @@
             </div>
           </div>
 
-          {/* Bidding Panel */}
-          {gameState.phase === 'bidding' && isYourTurn && (
-            <BiddingPanel 
+          {/* Scoreboard */}
+          <Scoreboard players={gameState.players} scores={gameState.scores} />
+        </div>
+
+          {/* Side Panel: Bidding / Trump / Card Ask / Round Result */}
+          {(gameState.phase === 'bidding' && isYourTurn) && (
+            <BiddingPanel
               currentBid={gameState.highest_bid}
               players={gameState.players}
               onBid={(amount) => {
@@ -923,14 +1364,12 @@
             />
           )}
 
-          {/* Trump Selector */}
-          {gameState.phase === 'trump_select' && gameState.highest_bidder_id === yourPlayerId && (
+          {gameState.phase === 'trump_select' && gameState.highest_bidder_id === effectiveYourId && (
             <TrumpSelector onSelect={(suit) => onAction('select_trump', { suit })} />
           )}
 
-          {/* Card Selector */}
-          {gameState.phase === 'card_ask' && gameState.highest_bidder_id === yourPlayerId && (
-            <CardSelector 
+          {gameState.phase === 'card_ask' && gameState.highest_bidder_id === effectiveYourId && (
+            <CardSelector
               hand={gameState.your_hand || []}
               selected={selectedCards}
               onSelect={setSelectedCards}
@@ -941,13 +1380,10 @@
             />
           )}
 
-          {/* Round Result */}
           {roundResult && (
             <RoundResult result={roundResult} players={gameState.players} onClose={onNewRound} />
           )}
 
-          {/* Scoreboard */}
-          <Scoreboard players={gameState.players} scores={gameState.scores} />
         </div>
       );
     }
@@ -1078,7 +1514,7 @@
       const selectableCards = generateAllSelectableCards(hand);
 
       return (
-        <div className="bidding-panel" style={{ minWidth: '600px', maxWidth: '800px' }}>
+        <div className="bidding-panel" style={{ width: '380px' }}>
           <h3>Ask for 2 Cards</h3>
           <p style={{ textAlign: 'center', marginBottom: '1rem', opacity: 0.8 }}>
             Select 2 cards you don't have. Players holding them will be your teammates.
@@ -1116,7 +1552,7 @@
       const bidderName = players.find(p => p.player_id === result.bidder_id)?.name;
       
       return (
-        <div className="bidding-panel" style={{ minWidth: '600px' }}>
+        <div className="bidding-panel" style={{ width: '380px' }}>
           <h3>Round Complete</h3>
           
           <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
