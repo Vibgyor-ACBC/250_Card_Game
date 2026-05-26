@@ -795,7 +795,9 @@
         highest_bidder_id: null,
         trump_suit: null,
         tricks_played: 0,
-        your_hand: hands[0],
+        your_hand: hands[0],          // full 8-card hand (used during playing)
+        visible_hand: hands[0].slice(0, 5),  // only 5 cards visible during bidding
+        hidden_cards: hands[0].slice(5),     // 3 cards revealed after bidding
         trick_points: {},  // accumulated per player
         bidder_team: [],
         opponent_team: [],
@@ -931,6 +933,8 @@
           ...gs,
           hands: newHands,
           your_hand: newHands[0],
+          visible_hand: newHands[0],  // reveal all 8 cards now that bidding is done
+          hidden_cards: [],
           phase: 'playing',
           current_turn: gs.highest_bidder_id,
           bidder_team: uniqueTeammates,
@@ -1080,6 +1084,8 @@
           players,
           hands,
           your_hand: hands[0],
+          visible_hand: hands[0].slice(0, 5),
+          hidden_cards: hands[0].slice(5),
           phase: 'bidding',
           current_turn: 'p0',
           highest_bid: 0,
@@ -1108,7 +1114,18 @@
           if (msg.event === 'joined') {
             // yourPlayerId from server — for online we use server-assigned id
           } else if (msg.event === 'round_started' || msg.event === 'state_update' || msg.event === 'state') {
-            setGameState(msg.data);
+            const serverState = msg.data;
+            // During bidding phases, only show 5 of the 8 cards
+            const biddingPhase = ['bidding', 'trump_select', 'card_ask'].includes(serverState.phase);
+            setGameState({
+              ...serverState,
+              visible_hand: biddingPhase
+                ? (serverState.visible_hand || (serverState.your_hand || []).slice(0, 5))
+                : serverState.your_hand,
+              hidden_cards: biddingPhase
+                ? (serverState.hidden_cards || (serverState.your_hand || []).slice(5))
+                : [],
+            });
             setRoundResult(null);
           } else if (msg.event === 'bid_placed') {
             setGameState(prev => prev ? { ...prev, highest_bid: msg.data.highest_bid, highest_bidder_id: msg.data.highest_bidder_id } : null);
@@ -1329,18 +1346,36 @@
                 <div className="player-bid">Bid: {you.bid === 0 ? 'Passed' : you.bid}</div>
               )}
               <div className="hand">
-                {(gameState.your_hand || []).map(cardId => (
-                  <Card 
-                    key={cardId} 
-                    cardId={cardId} 
-                    onClick={() => {
-                      if (gameState.phase === 'playing' && isYourTurn) {
-                        onAction('play_card', { card_id: cardId });
-                      }
-                    }}
-                    disabled={!isYourTurn || gameState.phase !== 'playing'}
-                  />
-                ))}
+                {(() => {
+                  const isBiddingPhase = ['bidding', 'trump_select', 'card_ask'].includes(gameState.phase);
+                  const displayHand = isBiddingPhase
+                    ? (gameState.visible_hand || (gameState.your_hand || []).slice(0, 5))
+                    : (gameState.your_hand || []);
+                  return displayHand.map(cardId => (
+                    <Card 
+                      key={cardId} 
+                      cardId={cardId} 
+                      onClick={() => {
+                        if (gameState.phase === 'playing' && isYourTurn) {
+                          onAction('play_card', { card_id: cardId });
+                        }
+                      }}
+                      disabled={!isYourTurn || gameState.phase !== 'playing'}
+                    />
+                  ));
+                })()}
+                {['bidding', 'trump_select', 'card_ask'].includes(gameState.phase) && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', marginLeft: '0.25rem' }}>
+                    {(gameState.hidden_cards || []).map((_, i) => (
+                      <div key={i} className="card card-back" style={{ opacity: 0.5 }} title="Revealed after bidding" />
+                    ))}
+                    {(gameState.hidden_cards || []).length > 0 && (
+                      <span style={{ fontSize: '0.75rem', opacity: 0.6, marginLeft: '0.25rem', whiteSpace: 'nowrap' }}>
+                        +{(gameState.hidden_cards || []).length} after bidding
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>
